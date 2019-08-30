@@ -54,7 +54,7 @@ function CoolLine:ADDON_LOADED(a1)
 		for k, v in pairs({
 			w = 360, h = 18, x = 0, y = -240,
 			statusbar = "Blizzard",
-			bgcolor = { r = 0, g = 0, b = 0, a = 0.6, },
+			bgcolor = { r = 0, g = 0, b = 0, a = 0.5, },
 			border = "Blizzard Dialog",
 			bordercolor = { r = 1, g = 1, b = 1, a = 1, },
 			font = "Friz Quadrata TT",
@@ -186,7 +186,7 @@ function CoolLine:ADDON_LOADED(a1)
 		self.border:SetBackdropBorderColor(db.bordercolor.r, db.bordercolor.g, db.bordercolor.b, db.bordercolor.a)
 		
 		self.overlay = self.overlay or CreateFrame("Frame", nil, self.border)
-		self.overlay:SetFrameLevel(11)
+		self.overlay:SetFrameLevel(24)
 
 		section = (db.vertical and db.h or db.w) / 6
 		iconsize = ((db.vertical and db.w) or db.h) + (db.iconplus or 0)
@@ -215,6 +215,7 @@ function CoolLine:ADDON_LOADED(a1)
 			self:UnregisterEvent("BAG_UPDATE_COOLDOWN")
 		else
 			self:RegisterEvent("BAG_UPDATE_COOLDOWN")
+			self:BAG_UPDATE_COOLDOWN()
 		end
 		if db.hidefail then
 			self:UnregisterEvent("UNIT_SPELLCAST_FAILED")
@@ -227,6 +228,7 @@ function CoolLine:ADDON_LOADED(a1)
 			frame:SetHeight(iconsize)
 		end
 	end
+	CoolLine.updatelook = updatelook
 	
 	if IsLoggedIn() then
 		CoolLine:PLAYER_LOGIN()
@@ -249,8 +251,25 @@ function CoolLine:PLAYER_LOGIN()
 	updatelook()
 	self:SPELLS_CHANGED()
 	self:SPELL_UPDATE_COOLDOWN()
-	self:BAG_UPDATE_COOLDOWN()
 	self:SetAlpha((#cooldowns == 0 and db.inactivealpha) or db.activealpha)
+	self:RegisterEvent("PLAYER_ENTERING_WORLD")
+	self:RegisterEvent("PLAYER_LEAVING_WORLD")
+end
+
+-----------------------------------------
+function CoolLine:PLAYER_ENTERING_WORLD()
+-----------------------------------------
+	self:RegisterEvent("SPELLS_CHANGED")
+	self:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+	self:SPELLS_CHANGED()
+	self:SPELL_UPDATE_COOLDOWN()
+end
+
+----------------------------------------
+function CoolLine:PLAYER_LEAVING_WORLD()
+----------------------------------------
+	self:UnregisterEvent("SPELLS_CHANGED")
+	self:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
 end
 
 local iconback = { bgFile="Interface\\AddOns\\CoolLine\\backdrop.tga" }
@@ -271,7 +290,7 @@ local function SetupIcon(frame, position, tthrot, active, fl)
 	throt = (throt < tthrot and throt) or tthrot
 	isactive = active or isactive
 	if fl then
-		frame:SetFrameLevel(random(1,4) * 2 + 2)
+		frame:SetFrameLevel(random(1,5) * 2 + 2)
 	end
 	SetValue(frame, position)
 end
@@ -370,7 +389,11 @@ CoolLine.NewCooldown, CoolLine.ClearCooldown = NewCooldown, ClearCooldown
 do  -- cache spells that have a cooldown
 	local CLTip = CreateFrame("GameTooltip", "CLTip", CoolLine, "GameTooltipTemplate")
 	CLTip:SetOwner(CoolLine, "ANCHOR_NONE")
-	local GetSpellName = GetSpellName
+	local GetSpellBookItemName, GetSpellBookItemInfo = GetSpellBookItemName, GetSpellBookItemInfo
+	local specialspells = {
+		[GetSpellInfo(87151) or "blah"] = true,  -- Archangel
+		[GetSpellInfo(14751) or "blah"] = "chakra",  -- Chakra
+	}
 	local cooldown1 = gsub(SPELL_RECAST_TIME_MIN, "%%%.%d[fg]", "(.+)")
 	local cooldown2 = gsub(SPELL_RECAST_TIME_SEC, "%%%.%d[fg]", "(.+)")
 	local function CheckRight(rtext)
@@ -383,16 +406,24 @@ do  -- cache spells that have a cooldown
 		local name, last
 		local sb = spells[btype]
 		for i = 1, 500, 1 do
-			name = GetSpellName(i, btype)
+			name = GetSpellBookItemName(i, btype)
 			if not name then break end
 			if name ~= last then
+				local stype, id = GetSpellBookItemInfo(i, btype)
 				last = name
 				if sb[name] then
-					sb[name] = i
+					sb[name] = id
+				elseif specialspells[name] then
+					sb[name] = id
+					if specialspells[name] == "chakra" then
+						sb[GetSpellInfo(88684) or "blah"] = 88684  -- Holy Word: Serenity
+						sb[GetSpellInfo(88682) or "blah"] = 88682  -- Holy Word: Aspire
+						sb[GetSpellInfo(88685) or "blah"] = 88685  -- Holy Word: Sanctuary
+					end
 				else
-					CLTip:SetSpell(i, btype)
+					CLTip:SetSpellBookItem(i, btype)
 					if CheckRight(CLTipTextRight2) or CheckRight(CLTipTextRight3) or CheckRight(CLTipTextRight4) then
-						sb[name] = i
+						sb[name] = id
 					end
 				end
 			end
@@ -414,10 +445,11 @@ do  -- scans spellbook to update cooldowns, throttled since the event fires a lo
 	local GetSpellCooldown, GetSpellTexture = GetSpellCooldown, GetSpellTexture
 	local function CheckSpellBook(btype)
 		for name, id in pairs(spells[btype]) do
-			local start, duration, enable = GetSpellCooldown(id, btype)
+			local start, duration, enable = GetSpellCooldown(id)
 			if enable == 1 and start > 0 and not block[name] and (not RuneCheck or RuneCheck(name, duration))then
 				if duration > 2.5 then
-					NewCooldown(name, GetSpellTexture(id, btype), start + duration, btype == BOOKTYPE_SPELL)
+					local _, _, texture = GetSpellInfo(id)
+					NewCooldown(name, texture, start + duration, btype == BOOKTYPE_SPELL)
 				else
 					for index, frame in ipairs(cooldowns) do
 						if frame.name == name then
@@ -730,6 +762,7 @@ function ShowOptions(a1)
 			info.value = value
 			info.hasArrow = true
 			info.func = HideCheck
+			info.notCheckable = 1
 			AddButton(lvl, text, 1)
 		end
 		local function AddSelect(lvl, text, arg1, value)
@@ -754,11 +787,13 @@ function ShowOptions(a1)
 			info.swatchFunc, info.opacityFunc, info.cancelFunc = SetColor, SetColor, SetColor
 			info.value = value
 			info.func = UIDropDownMenuButton_OpenColorPicker
+			info.notCheckable = 1
 			AddButton(lvl, text, nil)
 		end
 		CoolLineDD.initialize = function(self, lvl)
 			if lvl == 1 then
 				info.isTitle = true
+				info.notCheckable = 1
 				AddButton(lvl, "|cff88ffffCool|r|cff88ff88Line|r")
 				AddList(lvl, "Texture", "statusbar")
 				AddColor(lvl, "Texture Color", "bgcolor")
