@@ -21,7 +21,7 @@ local BOOKTYPE_SPELL, BOOKTYPE_PET = BOOKTYPE_SPELL, BOOKTYPE_PET
 local spells = { [BOOKTYPE_SPELL] = { }, [BOOKTYPE_PET] = { }, }
 local frames, cooldowns = { }, { }
 
-local SetValue, updatelook, createfs, ShowOptions
+local SetValue, updatelook, createfs, ShowOptions, RuneCheck
 local function SetValueH(this, v, just)
 	this:SetPoint(just or "CENTER", self, "LEFT", v, 0)
 end
@@ -42,7 +42,13 @@ function CoolLine:ADDON_LOADED(a1)
 	self.ADDON_LOADED = nil
 	
 	CoolLineDB = CoolLineDB or { }
-	db = CoolLineDB
+	if CoolLineDB.perchar then
+		CoolLineCharDB = CoolLineCharDB or CoolLineDB
+		db = CoolLineCharDB
+	else
+		CoolLineCharDB = nil
+		db = CoolLineDB
+	end
 	if db.dbinit ~= 1 then
 		db.dbinit = 1
 		for k, v in pairs({
@@ -66,6 +72,32 @@ function CoolLine:ADDON_LOADED(a1)
 		end
 	end
 	block = db.block
+	
+	if select(2, UnitClass("player")) == "DEATHKNIGHT" then
+		local runecd = {  -- fix by NeoSyrex
+			[GetSpellInfo(50977) or "Death Gate"] = 11,
+			[GetSpellInfo(43265) or "Death and Decay"] = 11,
+			[GetSpellInfo(48263) or "Frost Presence"] = 1,
+			[GetSpellInfo(48266) or "Blood Presence"] = 1,
+			[GetSpellInfo(48265) or "Unholy Presence"] = 1, 
+			[GetSpellInfo(42650) or "Army of the Dead"] = 11,
+			[GetSpellInfo(49222) or "Bone Shield"] = 11,
+			[GetSpellInfo(47476) or "Strangulate"] = 11,
+			[GetSpellInfo(51052) or "Anti-Magic Zone"] = 11,
+			[GetSpellInfo(63560) or "Ghoul Frenzy"] = 10,
+			[GetSpellInfo(49184) or "Howling Blast"] = 8,
+			[GetSpellInfo(51271) or "Unbreakable Armor"] = 11,
+			[GetSpellInfo(55233) or "Vampiric Blood"] = 11,
+			[GetSpellInfo(49005) or "Mark of Blood"] = 11,
+			[GetSpellInfo(48982) or "Rune Tap"] = 11,
+		}
+		RuneCheck = function(name, duration)
+			local rc = runecd[name]
+			if not rc or (rc <= duration and (rc > 10 or rc >= duration)) then
+				return true
+			end
+		end
+	end
 	
 	SlashCmdList.COOLLINE = ShowOptions
 	SLASH_COOLLINE1 = "/coolline"
@@ -110,24 +142,19 @@ function CoolLine:ADDON_LOADED(a1)
 		fs:SetText(text)
 		fs:SetWidth(db.fontsize * 3)
 		fs:SetHeight(db.fontsize + 2)
+		fs:SetShadowColor(db.bgcolor.r, db.bgcolor.g, db.bgcolor.b, db.bgcolor.a)
+		fs:SetShadowOffset(1, -1)
 		if just then
 			fs:ClearAllPoints()
 			if db.vertical then
 				fs:SetJustifyH("CENTER")
 				just = db.reverse and ((just == "LEFT" and "TOP") or "BOTTOM") or ((just == "LEFT" and "BOTTOM") or "TOP")
 			elseif db.reverse then
-				if just == "LEFT" then
-					just, offset = "RIGHT", offset + 1
-				else
-					just, offset = "LEFT", offset - 1
-				end
+				just = (just == "LEFT" and "RIGHT") or "LEFT"
+				offset = offset + ((just == "LEFT" and 1) or -1)
 				fs:SetJustifyH(just)
 			else
-				if just == "LEFT" then
-					offset = offset + 1
-				else
-					offset = offset - 1
-				end
+				offset = offset + ((just == "LEFT" and 1) or -1)
 				fs:SetJustifyH(just)
 			end
 		else
@@ -273,9 +300,9 @@ local function OnUpdate(this, a1, ctime, dofl)
 				frame:SetWidth(size)
 				frame:SetHeight(size)
 				SetupIcon(frame, section * remain, 0, true, dofl)
-			elseif remain > -1 then
+			elseif remain > -0.5 then
 				SetupIcon(frame, 0, 0, true, dofl)
-				frame:SetAlpha(1 + remain)  -- fades
+				frame:SetAlpha(1 + remain * 2)  -- fades
 			else
 				throt = (throt < 0.2 and throt) or 0.2
 				isactive = true
@@ -333,6 +360,7 @@ local function NewCooldown(name, icon, endtime, isplayer)
 	self:SetAlpha(db.activealpha)
 	OnUpdate(self, 2, ctime)
 end
+CoolLine.NewCooldown, CoolLine.ClearCooldown = NewCooldown, ClearCooldown
 
 do  -- cache spells that have a cooldown
 	local CLTip = CreateFrame("GameTooltip", "CLTip", CoolLine, "GameTooltipTemplate")
@@ -382,9 +410,18 @@ do  -- scans spellbook to update cooldowns, throttled since the event fires a lo
 	local function CheckSpellBook(btype)
 		for name, id in pairs(spells[btype]) do
 			local start, duration, enable = GetSpellCooldown(id, btype)
-			if enable == 1 and start > 0 then
-				if duration > 2.5 and not block[name] then
+			if enable == 1 and start > 0 and not block[name] and (not RuneCheck or RuneCheck(name, duration))then
+				if duration > 2.5 then
 					NewCooldown(name, GetSpellTexture(id, btype), start + duration, btype == BOOKTYPE_SPELL)
+				else
+					for index, frame in ipairs(cooldowns) do
+						if frame.name == name then
+							if frame.endtime > start + duration + 0.1 then
+								frame.endtime = start + duration
+							end
+							break
+						end
+					end
 				end
 			else
 				ClearCooldown(nil, name)
@@ -393,7 +430,7 @@ do  -- scans spellbook to update cooldowns, throttled since the event fires a lo
 	end
 	spellthrot:SetScript("OnUpdate", function(this, a1)
 		selap = selap + a1
-		if selap < 0.5 then return end
+		if selap < 0.33 then return end
 		selap = 0
 		this:Hide()
 		CheckSpellBook(BOOKTYPE_SPELL)
@@ -525,21 +562,23 @@ function CoolLine:UNIT_SPELLCAST_FAILED(unit, spell)
 	if unit ~= "player" or #cooldowns == 0 then return end
 	for index, frame in pairs(cooldowns) do
 		if frame.name == spell then
-			if not failborder then
-				failborder = CreateFrame("Frame", nil, CoolLine.border)
-				failborder:SetBackdrop(iconback)
-				failborder:SetBackdropColor(1, 0, 0, 0.9)
-				failborder:Hide()
-				failborder:SetScript("OnUpdate", function(this, a1)
-					this.alp = this.alp - a1
-					if this.alp < 0 then return this:Hide() end
-					this:SetAlpha(this.alp > 1 and 1 or this.alp)
-				end)
+			if frame.endtime - GetTime() > 1 then
+				if not failborder then
+					failborder = CreateFrame("Frame", nil, CoolLine.border)
+					failborder:SetBackdrop(iconback)
+					failborder:SetBackdropColor(1, 0, 0, 0.9)
+					failborder:Hide()
+					failborder:SetScript("OnUpdate", function(this, a1)
+						this.alp = this.alp - a1
+						if this.alp < 0 then return this:Hide() end
+						this:SetAlpha(this.alp > 1 and 1 or this.alp)
+					end)
+				end
+				failborder.alp = 1.2
+				failborder:SetPoint("TOPLEFT", frame, "TOPLEFT", -2, 2)
+				failborder:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 2, -2)
+				failborder:Show()
 			end
-			failborder.alp = 1.2
-			failborder:SetPoint("TOPLEFT", frame, "TOPLEFT", -2, 2)
-			failborder:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 2, -2)
-			failborder:Show()
 			break
 		end
 	end
@@ -547,7 +586,7 @@ function CoolLine:UNIT_SPELLCAST_FAILED(unit, spell)
 end
 
 
-local CoolLineDD
+local CoolLineDD, Set
 local info = { }
 function ShowOptions(a1)
 	if type(a1) == "string" and a1 ~= "" and a1 ~= "menu" and a1 ~= "options" and a1 ~= "help" then
@@ -569,7 +608,7 @@ function ShowOptions(a1)
 		CoolLineDD = CreateFrame("Frame", "CoolLineDD", UIParent)
 		CoolLineDD.displayMode = "MENU"
 
-		local function Set(b, a1)
+		Set = function(b, a1)
 			if a1 == "unlock" then
 				if not CoolLine.resizer then
 					CoolLine:SetMovable(true)
@@ -591,7 +630,7 @@ function ShowOptions(a1)
 					local resize = CoolLine.resizer
 					resize:SetWidth(8)
 					resize:SetHeight(8)
-					resize:SetPoint("BOTTOMRIGHT", CoolLine, "BOTTOMRIGHT", 0, 0)
+					resize:SetPoint("BOTTOMRIGHT", CoolLine, "BOTTOMRIGHT", 2, -2)
 					resize:SetScript("OnMouseDown", function(this) CoolLine:StartSizing("BOTTOMRIGHT") end)
 					resize:SetScript("OnMouseUp", function(this) 
 						CoolLine:StopMovingOrSizing()
@@ -604,6 +643,7 @@ function ShowOptions(a1)
 					CoolLine:EnableMouse(true)
 					CoolLine.resizer:Show()
 					CoolLine:SetAlpha(db.activealpha)
+					print("CoolLine - drag frame to reposition or drag red corner to resize")
 				else
 					CoolLine.unlock = nil
 					CoolLine:EnableMouse(false)
@@ -616,6 +656,14 @@ function ShowOptions(a1)
 					db.w, db.h = ph, pw
 				end
 				db[a1] = not db[a1]
+				if a1 == "perchar" then
+					if db.perchar then
+						CoolLineCharDB = CoolLineCharDB or CoolLineDB
+					else
+						CoolLineCharDB = nil
+					end
+					ReloadUI()
+				end
 				updatelook()
 			end
 		end
@@ -680,8 +728,8 @@ function ShowOptions(a1)
 			info.arg1 = arg1
 			info.func = SetSelect
 			info.value = value
-			if tonumber(value) then
-				if floor(100 * tonumber(value)) == floor(100 * tonumber(db[arg1] or -1)) then
+			if tonumber(value) and tonumber(db[arg1] or "blah") then
+				if floor(100 * tonumber(value)) == floor(100 * tonumber(db[arg1])) then
 					info.checked = true
 				end
 			else
@@ -717,10 +765,7 @@ function ShowOptions(a1)
 				AddList(lvl, "Active Opacity", "activealpha")
 				AddToggle(lvl, "Vertical", "vertical")
 				AddToggle(lvl, "Reverse", "reverse")
-				AddToggle(lvl, "Disable Cast Fail", "hidefail")
-				AddToggle(lvl, "Disable Equipped", "hideinv")
-				AddToggle(lvl, "Disable Bags", "hidebag")
-				AddToggle(lvl, "Disable Pet", "hidepet")
+				AddList(lvl, "More", "More")
 				AddToggle(lvl, "Unlock", "unlock")
 			elseif lvl and lvl > 1 then
 				local sub = UIDROPDOWNMENU_MENU_VALUE
@@ -746,10 +791,33 @@ function ShowOptions(a1)
 					for i = 0, 1, 0.1 do
 						AddSelect(lvl, format("%.1f", i), sub, i)
 					end
+				elseif sub == "More" then
+					AddToggle(lvl, "Disable Cast Fail", "hidefail")
+					AddToggle(lvl, "Disable Equipped", "hideinv")
+					AddToggle(lvl, "Disable Bags", "hidebag")
+					AddToggle(lvl, "Disable Pet", "hidepet")
+					AddToggle(lvl, "Save Per Char", "perchar")
 				end
 			end
 		end
 	end
 	ToggleDropDownMenu(1, nil, CoolLineDD, "cursor")
+end
+
+CONFIGMODE_CALLBACKS = CONFIGMODE_CALLBACKS or {}
+CONFIGMODE_CALLBACKS.CoolLine = function(action, mode)
+	if action == "ON" then
+		if not CoolLineDD then
+			ShowOptions()
+			ToggleDropDownMenu(1, nil, CoolLineDD, "cursor")
+		end
+		if CoolLineDD and not CoolLine.unlock then
+			Set(nil, "unlock")
+		end
+	elseif action == "OFF" then
+		if CoolLineDD and CoolLine.unlock then
+			Set(nil, "unlock")
+		end
+	end
 end
 

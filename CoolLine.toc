@@ -1,10 +1,11 @@
-## Interface: 30100
+## Interface: 30200
 ## Title: CoolLine
 ## Notes: Shows cooldowns on a single bar.
 ## Author: TotalPackage
-## Version: 3.1.006
+## Version: 3.2.005
 
 ## SavedVariables: CoolLineDB
+## SavedVariablesPerCharacter: CoolLineCharDB
 
 ## OptionalDeps: LibSharedMedia-3.0
 
