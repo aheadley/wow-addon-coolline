@@ -134,7 +134,7 @@ function CoolLine:ADDON_LOADED(a1)
 		this:SetScript("OnShow", nil)
 	end)
 	InterfaceOptions_AddCategory(panel)
-	
+
 	createfs = function(f, text, offset, just)
 		local fs = f or self.overlay:CreateFontString(nil, "OVERLAY")
 		fs:SetFont(smed:Fetch("font", db.font), db.fontsize)
@@ -189,17 +189,21 @@ function CoolLine:ADDON_LOADED(a1)
 		self.overlay:SetFrameLevel(11)
 
 		section = (db.vertical and db.h or db.w) / 6
-		iconsize = db.vertical and db.w or db.h
+		iconsize = ((db.vertical and db.w) or db.h) + (db.iconplus or 0)
 		SetValue = (db.vertical and (db.reverse and SetValueVR or SetValueV)) or (db.reverse and SetValueHR or SetValueH)
 		
 		tick0 = createfs(tick0, "0", 0, "LEFT")
 		tick1 = createfs(tick1, "1", section)
-		tick10 = createfs(tick10, "10", section * 2)
-		tick30 = createfs(tick30, "30", section * 3)
+		tick10 = createfs(tick10, "3", section * 2)
+		tick30 = createfs(tick30, "10", section * 3)
 		tick60 = createfs(tick60, "60", section * 4)
 		tick120 = createfs(tick120, "2m", section * 5)
 		tick300 = createfs(tick300, "6m", section * 6, "RIGHT")
-		
+
+		if not self.cb and (not smed:IsValid("font", db.font) or not smed:IsValid("border", db.border) or not smed:IsValid("statusbar", db.statusbar)) then
+			smed.RegisterCallback(self, "LibSharedMedia_Registered", updatelook)
+			self.cb = true
+		end
 		if db.hidepet then
 			self:UnregisterEvent("UNIT_PET")
 			self:UnregisterEvent("PET_BAR_UPDATE_COOLDOWN")
@@ -223,6 +227,7 @@ function CoolLine:ADDON_LOADED(a1)
 			frame:SetHeight(iconsize)
 		end
 	end
+	
 	if IsLoggedIn() then
 		CoolLine:PLAYER_LOGIN()
 	else
@@ -290,9 +295,9 @@ local function OnUpdate(this, a1, ctime, dofl)
 	isactive, throt = false, 1.5
 	for index, frame in pairs(cooldowns) do
 		local remain = frame.endtime - ctime
-		if remain < 10 then
+		if remain < 3 then
 			if remain > 1 then
-				SetupIcon(frame, section * (remain + 8) * 0.111, 0.03, true, dofl)  -- 1 + (remain - 1) / 9
+				SetupIcon(frame, section * (remain + 1) * 0.5, 0.02, true, dofl)  -- 1 + (remain - 1) / 2
 			elseif remain > 0.3 then
 				SetupIcon(frame, section * remain, 0, true, dofl)
 			elseif remain > 0 then
@@ -300,18 +305,18 @@ local function OnUpdate(this, a1, ctime, dofl)
 				frame:SetWidth(size)
 				frame:SetHeight(size)
 				SetupIcon(frame, section * remain, 0, true, dofl)
-			elseif remain > -0.5 then
+			elseif remain > -1 then
 				SetupIcon(frame, 0, 0, true, dofl)
-				frame:SetAlpha(1 + remain * 2)  -- fades
+				frame:SetAlpha(1 + remain)  -- fades
 			else
 				throt = (throt < 0.2 and throt) or 0.2
 				isactive = true
 				ClearCooldown(frame)
 			end
-		elseif remain < 30 then
-			SetupIcon(frame, section * (remain + 30) * 0.05, remain > 11 and 0.06 or 0.02, true, dofl)  -- 2 + (remain - 10) / 20
+		elseif remain < 10 then
+			SetupIcon(frame, section * (remain + 11) * 0.143, remain > 4 and 0.05 or 0.02, true, dofl)  -- 2 + (remain - 3) / 7
 		elseif remain < 60 then
-			SetupIcon(frame, section * (remain + 60) * 0.03333, 0.12, true, dofl)  -- 3 + (remain - 30) / 30
+			SetupIcon(frame, section * (remain + 140) * 0.02, 0.12, true, dofl)  -- 3 + (remain - 10) / 50
 		elseif remain < 120 then
 			SetupIcon(frame, section * (remain + 180) * 0.01666, 0.25, true, dofl)  -- 4 + (remain - 60) / 60
 		elseif remain < 360 then
@@ -654,6 +659,9 @@ function ShowOptions(a1)
 				if a1 == "vertical" then
 					local pw, ph = db.w, db.h
 					db.w, db.h = ph, pw
+				elseif a1 == "resetall" then
+					CoolLineCharDB, CoolLineDB = nil, nil
+					return ReloadUI()
 				end
 				db[a1] = not db[a1]
 				if a1 == "perchar" then
@@ -763,8 +771,7 @@ function ShowOptions(a1)
 				AddColor(lvl, "Item/Pet Color", "nospellcolor")
 				AddList(lvl, "Inactive Opacity", "inactivealpha")
 				AddList(lvl, "Active Opacity", "activealpha")
-				AddToggle(lvl, "Vertical", "vertical")
-				AddToggle(lvl, "Reverse", "reverse")
+				AddList(lvl, "Icon Size", "iconplus")
 				AddList(lvl, "More", "More")
 				AddToggle(lvl, "Unlock", "unlock")
 			elseif lvl and lvl > 1 then
@@ -791,12 +798,19 @@ function ShowOptions(a1)
 					for i = 0, 1, 0.1 do
 						AddSelect(lvl, format("%.1f", i), sub, i)
 					end
+				elseif sub == "iconplus" then
+					for i = 0, 24, 2 do
+						AddSelect(lvl, format("+%d", i), sub, i)
+					end
 				elseif sub == "More" then
+					AddToggle(lvl, "Vertical", "vertical")
+					AddToggle(lvl, "Reverse", "reverse")
 					AddToggle(lvl, "Disable Cast Fail", "hidefail")
 					AddToggle(lvl, "Disable Equipped", "hideinv")
 					AddToggle(lvl, "Disable Bags", "hidebag")
 					AddToggle(lvl, "Disable Pet", "hidepet")
 					AddToggle(lvl, "Save Per Char", "perchar")
+					AddToggle(lvl, _G.RESET_TO_DEFAULT, "resetall")
 				end
 			end
 		end
