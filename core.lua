@@ -3,7 +3,7 @@ CoolLine:SetScript("OnEvent", function(this, event, ...)
 	this[event](this, ...)
 end)
 
-local IS_WOW_8 = GetBuildInfo():match("^8")
+local IS_WOW_C = WOW_PROJECT_ID == WOW_PROJECT_CLASSIC
 
 local smed = LibStub("LibSharedMedia-3.0")
 
@@ -274,18 +274,20 @@ function CoolLine:PLAYER_LOGIN()
 	self.SPELL_UPDATE_CHARGES = self.SPELL_UPDATE_COOLDOWN
 	self:SPELL_UPDATE_COOLDOWN()
 
-	self:RegisterEvent("PET_BATTLE_OPENING_START")
-	self:RegisterEvent("PET_BATTLE_CLOSE")
-	self.PET_BATTLE_OPENING_START = self.Hide
-	self.PET_BATTLE_CLOSE = self.Show
-	if C_PetBattles.IsInBattle() then
-		self:Hide()
-	end
+	if not IS_WOW_C then
+		self:RegisterEvent("PET_BATTLE_OPENING_START")
+		self:RegisterEvent("PET_BATTLE_CLOSE")
+		self.PET_BATTLE_OPENING_START = self.Hide
+		self.PET_BATTLE_CLOSE = self.Show
+		if C_PetBattles.IsInBattle() then
+			self:Hide()
+		end
 
-	self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
-	if UnitHasVehicleUI("player") then
-		self:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
-		self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+		self:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+		if UnitHasVehicleUI("player") then
+			self:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
+			self:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+		end
 	end
 
 	updatelook()
@@ -450,6 +452,9 @@ do  -- cache spells that have a cooldown
 			if not spellName then break end
 			local spellType, spellID = GetSpellBookItemInfo(i, btype)
 			if spellID and spellType == "FLYOUT" then
+				-- GetFlyoutInfo and GetFlyoutSlotInfo are removed in classic but
+				-- but the spellType should never be "FLYOUT" so should be ok to
+				-- just let that guard this block
 				local _, _, numSlots, isKnown = GetFlyoutInfo(spellID)
 				if isKnown then
 					for j = 1, numSlots do
@@ -608,11 +613,7 @@ function CoolLine:PET_BAR_UPDATE_COOLDOWN()
 		local start, duration, enable = GetPetActionCooldown(i)
 		if enable == 1 then
 			local name, _, texture
-			if IS_WOW_8 then
-				name, texture = GetPetActionInfo(i)
-			else
-				name, _, texture = GetPetActionInfo(i)
-			end
+			name, _, texture = GetPetActionInfo(i)
 			if name then
 				if start > 0 and not block[name] then
 					if duration > 3 then
@@ -682,9 +683,7 @@ local failborder
 ----------------------------------------------------
 function CoolLine:UNIT_SPELLCAST_FAILED(unit, spell, id8)
 ----------------------------------------------------
-	if IS_WOW_8 then
-		spell = GetSpellInfo(id8) -- TEMPORARY, need to switch to using spell IDs throughout
-	end
+	spell = GetSpellInfo(id8) -- TEMPORARY, need to switch to using spell IDs throughout
 
 	if #cooldowns == 0 then return end
 
