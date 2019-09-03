@@ -4,6 +4,7 @@ CoolLine:SetScript("OnEvent", function(this, event, ...)
 end)
 
 local IS_WOW_C = WOW_PROJECT_ID == WOW_PROJECT_CLASSIC
+local MIN_CD_TIME_MS = 2499
 
 local smed = LibStub("LibSharedMedia-3.0")
 
@@ -446,49 +447,51 @@ do  -- cache spells that have a cooldown
 	local function CacheBook(btype)
 		local lastID
 		local sb = spells[btype]
-		local _, _, offset, numSpells = GetSpellTabInfo(2)
-		for i = 1, offset + numSpells do
-			local spellName = GetSpellBookItemName(i, btype)
-			if not spellName then break end
-			local spellType, spellID = GetSpellBookItemInfo(i, btype)
-			if spellID and spellType == "FLYOUT" then
-				-- GetFlyoutInfo and GetFlyoutSlotInfo are removed in classic but
-				-- but the spellType should never be "FLYOUT" so should be ok to
-				-- just let that guard this block
-				local _, _, numSlots, isKnown = GetFlyoutInfo(spellID)
-				if isKnown then
-					for j = 1, numSlots do
-						local flyID, _, _, flyName = GetFlyoutSlotInfo(spellID, j)
-						lastID = flyID
-						if flyID then
-							local flyCD = GetSpellBaseCooldown(flyID)
-							if flyCD and flyCD > 2499 then
-								sb[flyID] = flyName -- specialspells[flyID] or flyName
+		for spellBookTabIdx = 1, GetNumSpellTabs() do
+			local _, _, offset, numSpells = GetSpellTabInfo(spellBookTabIdx)
+			for spellBookIdx = offset + 1, offset + numSpells do
+				local spellName = GetSpellBookItemName(spellBookIdx, btype)
+				if not spellName then break end
+				local spellType, spellID = GetSpellBookItemInfo(spellBookIdx, btype)
+				if spellID and spellType == "FLYOUT" then
+					-- GetFlyoutInfo and GetFlyoutSlotInfo are removed in classic but
+					-- but the spellType should never be "FLYOUT" so should be ok to
+					-- just let that guard this block
+					local _, _, numSlots, isKnown = GetFlyoutInfo(spellID)
+					if isKnown then
+						for flyoutIdx = 1, numSlots do
+							local flyID, _, _, flyName = GetFlyoutSlotInfo(spellID, flyoutIdx)
+							lastID = flyID
+							if flyID then
+								local flyCD = GetSpellBaseCooldown(flyID)
+								if flyCD and flyCD > MIN_CD_TIME_MS then
+									sb[flyID] = flyName -- specialspells[flyID] or flyName
+								end
 							end
 						end
 					end
-				end
-			elseif spellID and spellType == "SPELL" and spellID ~= lastID then
-				-- Base spell = slot ID + name from slot ID
-				-- Real spell = ID from slot name + name from slot name
-				-- For the purposes of CoolLine we only care about the real spell.
-				lastID = spellID
-				spellName, _, _, _, _, _, spellID = GetSpellInfo(spellName)
-				if spellID then
-					-- Special spells like warlock Cauterize Master can be in
-					-- a limbo state during loading. Just ignore them in that
-					-- case. The spellbook will update again momentarily and
-					-- they will correctly resolve then.
-					local _, maxCharges = GetSpellCharges(spellID)
-					if maxCharges and maxCharges > 0 then
-						chargespells[btype][spellID] = spellName
-					else
-						local cd = GetSpellBaseCooldown(spellID)
-						if cd and cd > 2499 then
-							sb[spellID] = spellName
-				--			if specialspells[spellName] then
-				--				sb[ specialspells[spellName] ] = spellName
-				--			end
+				elseif spellID and spellType == "SPELL" and spellID ~= lastID then
+					-- Base spell = slot ID + name from slot ID
+					-- Real spell = ID from slot name + name from slot name
+					-- For the purposes of CoolLine we only care about the real spell.
+					lastID = spellID
+					spellName, _, _, _, _, _, spellID = GetSpellInfo(spellID)
+					if spellID then
+						-- Special spells like warlock Cauterize Master can be in
+						-- a limbo state during loading. Just ignore them in that
+						-- case. The spellbook will update again momentarily and
+						-- they will correctly resolve then.
+						local _, maxCharges = GetSpellCharges(spellID)
+						if maxCharges and maxCharges > 0 then
+							chargespells[btype][spellID] = spellName
+						else
+							local cd = GetSpellBaseCooldown(spellID)
+							if cd and cd > MIN_CD_TIME_MS then
+								sb[spellID] = spellName
+					--			if specialspells[spellName] then
+					--				sb[ specialspells[spellName] ] = spellName
+					--			end
+							end
 						end
 					end
 				end
@@ -513,9 +516,9 @@ do  -- scans spellbook to update cooldowns, throttled since the event fires a lo
 
 	local function CheckSpellBook(btype)
 		for id, name in pairs(spells[btype]) do
-			local start, duration, enable = GetSpellCooldown(name)
+			local start, duration, enable = GetSpellCooldown(id)
 			if enable == 1 and start > 0 and not block[name] and (not RuneCheck or RuneCheck(name, duration)) then
-				if duration > 2.5 then
+				if duration > (MIN_CD_TIME_MS / 1000) then
 					local _, _, texture = GetSpellInfo(id)
 					NewCooldown(name, texture, start + duration, btype == BOOKTYPE_SPELL)
 				else
