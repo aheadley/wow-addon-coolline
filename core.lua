@@ -684,14 +684,13 @@ end
 
 local failborder
 ----------------------------------------------------
-function CoolLine:UNIT_SPELLCAST_FAILED(unit, spell, id8)
+function CoolLine:UNIT_SPELLCAST_FAILED(unit, castGUID, spellID)
 ----------------------------------------------------
-	spell = GetSpellInfo(id8) -- TEMPORARY, need to switch to using spell IDs throughout
-
+	spellName = GetSpellInfo(spellID)
 	if #cooldowns == 0 then return end
 
 	for index, frame in pairs(cooldowns) do
-		if frame.name == spell then
+		if frame.name == spellName then
 			if frame.endtime - GetTime() > 1 then
 				if not failborder then
 					failborder = CreateFrame("Frame", nil, CoolLine.border)
